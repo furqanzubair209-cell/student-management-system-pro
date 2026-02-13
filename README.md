@@ -150,17 +150,7 @@ student-management-system-js/
 
 ---
 
-# ▶️ How to Run
 
-1. Clone the repository:
-
-git clone https://github.com/your-username/student-management-system-js.git
-
-2. Open `index.html` in your browser.
-
-No server required.
-
----
 
 # 📈 Highlights
 
