@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Management System</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <!-- LOGIN SCREEN -->
+    <div class="login-container" id="loginPage">
+        <h1>Student Management System</h1>
+        <input id="username" placeholder="Username / Roll Number" required>
+        <input id="password" type="password" placeholder="Password (for admin)">
+        <button type="button" onclick="login()">Login</button>
+        <p class="note">Admin: admin / admin123 | Students: Roll Number only</p>
+    </div>
+
+    <!-- APP CONTAINER -->
+    <!-- Mobile Menu Toggle -->
+    <button id="menuToggle" style="position:fixed; top:15px; left:15px; z-index:200; padding:10px 15px; border:none; border-radius:8px; background:#00c6ff; color:white; cursor:pointer;">☰</button>
+    
+    <div class="app hidden" id="app">
+        <!-- SIDEBAR -->
+        <nav class="sidebar" id="sidebar" aria-label="Navigation Menu">
+            <h2 id="panelTitle">Admin Panel</h2>
+            
+            <!-- Admin Menu -->
+            <div id="adminMenu">
+                <button type="button" onclick="showSection('dashboard')">Dashboard</button>
+                <button type="button" onclick="showSection('students')">Students</button>
+                <button type="button" onclick="showSection('courses')">Courses</button>
+                <button type="button" onclick="showSection('allocate')">Allocate Courses</button>
+                <button type="button" onclick="showSection('grades')">Manage Grades</button>
+                <button type="button" onclick="showSection('fees')">Manage Fees</button>
+            </div>
+            
+            <!-- Student Menu -->
+            <div id="studentMenu" class="hidden">
+                <button type="button" onclick="showSection('studentDashboard')">My Dashboard</button>
+                <button type="button" onclick="showSection('myCourses')">My Courses</button>
+                <button type="button" onclick="showSection('myFees')">My Fees</button>
+            </div>
+            <button type="button" class="logoutBtn" onclick="logout()">Logout</button>
+        </nav>
+
+        <!-- MAIN CONTENT -->
+        <main class="main">
+            <!-- ================= ADMIN PANEL ================= -->
+            <div id="adminPanel">
+                <!-- DASHBOARD -->
+                <section id="dashboard" class="section active">
+                    <h1>Admin Dashboard</h1>
+                    <div class="stats">
+                        <div class="card stat">
+                            <h3>Total Students</h3>
+                            <p id="totalStudents">0</p>
+                            <canvas id="studentsChart"></canvas>
+                        </div>
+                        <div class="card stat">
+                            <h3>Total Courses</h3>
+                            <p id="totalCourses">0</p>
+                            <canvas id="coursesChart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <div class="card">
+                        <h3>Student Performance Overview</h3>
+                        <canvas id="performanceChart"></canvas>
+                    </div>
+                    
+                    <div class="card">
+                        <h3>Department-wise Distribution</h3>
+                        <canvas id="deptChart"></canvas>
+                    </div>
+                    
+                    <div class="card">
+                        <h3>Fee Collection Status</h3>
+                        <canvas id="feeChart"></canvas>
+                    </div>
+                </section>
+
+                <!-- STUDENT MANAGEMENT -->
+                <section id="students" class="section">
+                    <h2>Add Student</h2>
+                    <form class="form-row">
+                        <input id="roll" placeholder="Roll Number" required>
+                        <input id="name" placeholder="Name" required>
+                        <input id="dept" placeholder="Department" required>
+                        <input id="semester" type="number" placeholder="Semester" min="1" max="8" required>
+                        <button type="button" onclick="addStudent()">Add</button>
+                    </form>
+                    
+                    <div class="card">
+                        <h2>All Students</h2>
+                        <div class="form-row">
+                            <input id="searchRoll" placeholder="Search by Roll or Name" onkeyup="searchStudent()">
+                            <button onclick="exportStudents()" style="background:#00c853;">Export CSV</button>
+                        </div>
+                        <div class="table-wrapper">
+                            <table id="studentTable">
+                                <thead>
+                                    <tr>
+                                        <th>Roll</th>
+                                        <th>Name</th>
+                                        <th>Dept</th>
+                                        <th>Semester</th>
+                                        <th>CGPA</th>
+                                        <th>Fee</th>
+                                        <th>Fine</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- COURSE MANAGEMENT -->
+                <section id="courses" class="section">
+                    <h2>Add Course</h2>
+                    <form class="form-row">
+                        <input id="courseCode" placeholder="Code" required>
+                        <input id="courseName" placeholder="Name" required>
+                        <input id="credits" type="number" placeholder="Credits" min="1" max="6" required>
+                        <input id="teacher" placeholder="Teacher" required>
+                        <button type="button" onclick="addCourse()">Add</button>
+                    </form>
+                    
+                    <div class="card">
+                        <h2>All Courses</h2>
+                        
+                        <!-- Course Filters -->
+                        <div class="form-row">
+                            <input id="searchCourse" placeholder="Search by Code or Name" onkeyup="searchCourse()">
+                            <input id="deptFilter" placeholder="Filter by Teacher" onkeyup="filterCoursesByDept()">
+                            <button onclick="deleteMultipleCourses()" style="background:#ff3d00;">Delete Selected</button>
+                            <button onclick="exportCourses()" style="background:#00c853;">Export CSV</button>
+                        </div>
+                        
+                        <!-- Course Statistics -->
+                        <div class="stats" style="margin-bottom: 15px;">
+                            <div class="stat" style="background: rgba(0,198,255,0.1); padding: 10px; border-radius: 8px;">
+                                <h4>Total Courses</h4>
+                                <p id="totalCoursesCount">0</p>
+                            </div>
+                            <div class="stat" style="background: rgba(0,198,255,0.1); padding: 10px; border-radius: 8px;">
+                                <h4>Total Credits</h4>
+                                <p id="totalCreditsCount">0</p>
+                            </div>
+                            <div class="stat" style="background: rgba(0,198,255,0.1); padding: 10px; border-radius: 8px;">
+                                <h4>Avg. Credits/Course</h4>
+                                <p id="avgCredits">0</p>
+                            </div>
+                        </div>
+                        
+                        <div class="table-wrapper">
+                            <table id="courseTable">
+                                <thead>
+                                    <tr>
+                                        <th><input type="checkbox" id="selectAllCourses" onclick="toggleSelectAll(this)"></th>
+                                        <th>Code</th>
+                                        <th>Name</th>
+                                        <th>Credits</th>
+                                        <th>Teacher</th>
+                                        <th>Students Enrolled</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ALLOCATE COURSES -->
+                <section id="allocate" class="section">
+                    <h2>Allocate Course to Student</h2>
+                    <div class="card">
+                        <form class="form-row">
+                            <input id="allocRoll" placeholder="Student Roll" required>
+                            <input id="allocCode" placeholder="Course Code" required>
+                            <button type="button" onclick="allocateCourse()">Allocate</button>
+                        </form>
+                        
+                        <h3>Quick Allocate</h3>
+                        <div class="form-row">
+                            <select id="quickStudent">
+                                <option value="">Select Student</option>
+                            </select>
+                            <select id="quickCourse">
+                                <option value="">Select Course</option>
+                            </select>
+                            <button type="button" onclick="quickAllocate()">Quick Allocate</button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- GRADE MANAGEMENT -->
+                <section id="grades" class="section">
+                    <h2>Manage Student Grades</h2>
+                    <div class="card">
+                        <form class="form-row">
+                            <input id="gradeRoll" placeholder="Student Roll" required>
+                            <input id="gradeCode" placeholder="Course Code" required>
+                            <select id="gradeSelect">
+                                <option value="4.0">A+ (4.0)</option>
+                                <option value="3.7">A (3.7)</option>
+                                <option value="3.3">B+ (3.3)</option>
+                                <option value="3.0">B (3.0)</option>
+                                <option value="2.7">C+ (2.7)</option>
+                                <option value="2.3">C (2.3)</option>
+                                <option value="2.0">D (2.0)</option>
+                                <option value="0.0">F (0.0)</option>
+                            </select>
+                            <button type="button" onclick="addGrade()">Assign Grade</button>
+                        </form>
+                    </div>
+                    
+                    <div class="card">
+                        <h3>Student Grade Report</h3>
+                        <div class="form-row">
+                            <input id="gradeReportRoll" placeholder="Enter Roll to View Grades" onchange="showGradeReport()">
+                            <button onclick="printGradeReport()">Print Report</button>
+                        </div>
+                        <div id="gradeReport"></div>
+                    </div>
+                </section>
+
+                <!-- FEES MANAGEMENT -->
+                <section id="fees" class="section">
+                    <h2>Manage Fees</h2>
+                    <div class="card">
+                        <form class="form-row">
+                            <input id="feeRoll" placeholder="Student Roll" required>
+                            <button type="button" onclick="markPaid()" style="background:#00c853;">Mark Paid</button>
+                            <button type="button" onclick="markUnpaid()" style="background:#ff3d00;">Mark Unpaid</button>
+                            <input id="fineAmount" type="number" placeholder="Fine Amount" min="0">
+                            <button type="button" onclick="addFine()">Add Fine</button>
+                        </form>
+                    </div>
+                    
+                    <div class="card">
+                        <h3>Fee Collection Summary</h3>
+                        <canvas id="feeChart"></canvas>
+                    </div>
+                    
+                    <div class="card">
+                        <h3>Defaulters List</h3>
+                        <div class="table-wrapper">
+                            <table id="defaultersTable">
+                                <thead>
+                                    <tr>
+                                        <th>Roll</th>
+                                        <th>Name</th>
+                                        <th>Department</th>
+                                        <th>Fine Amount</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+            </div>
+            <!-- ================= END ADMIN PANEL ================= -->
+
+            <!-- ================= STUDENT PANEL ================= -->
+            <div id="studentPanel" class="hidden">
+                <!-- STUDENT DASHBOARD -->
+                <section id="studentDashboard" class="section">
+                    <h1>My Dashboard</h1>
+                    <div class="stats">
+                        <div class="card">
+                            <h3>Welcome!</h3>
+                            <p id="welcomeMsg"></p>
+                            <p id="studentInfo"></p>
+                        </div>
+                        <div class="card">
+                            <h3>CGPA Progress</h3>
+                            <canvas id="studentGPAChart"></canvas>
+                            <p id="cgpaDisplay" style="font-size: 24px; font-weight: bold; margin-top: 10px;"></p>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h3>Semester-wise GPA</h3>
+                        <canvas id="semesterGPAChart"></canvas>
+                    </div>
+                </section>
+
+                <!-- STUDENT COURSES -->
+                <section id="myCourses" class="section">
+                    <h1>My Courses</h1>
+                    <div class="card">
+                        <div class="table-wrapper">
+                            <table id="myCourseTable">
+                                <thead>
+                                    <tr>
+                                        <th>Code</th>
+                                        <th>Name</th>
+                                        <th>Credits</th>
+                                        <th>Teacher</th>
+                                        <th>Grade</th>
+                                        <th>Grade Points</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- STUDENT FEES -->
+                <section id="myFees" class="section">
+                    <h1>My Fees</h1>
+                    <div class="card">
+                        <p id="feeStatus"></p>
+                        <button onclick="downloadFeeReceipt()" style="margin-top: 15px;">Download Receipt</button>
+                    </div>
+                </section>
+            </div>
+            <!-- ================= END STUDENT PANEL ================= -->
+        </main>
+    </div>
+
+    <!-- TOAST -->
+    <div id="toast"></div>
+    
+    <script src="script.js"></script>
+</body>
+</html>
