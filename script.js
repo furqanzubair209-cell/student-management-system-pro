@@ -1,104 +1,76 @@
+// ==================== CONSTANTS ====================
 const MAX_CREDITS = 18;
+const TUITION_FEE = 5000;
+
 const GRADE_POINTS = {
     'A+': 4.0, 'A': 3.7, 'B+': 3.3, 'B': 3.0,
     'C+': 2.7, 'C': 2.3, 'D': 2.0, 'F': 0.0
 };
 
-let students = JSON.parse(localStorage.getItem("students")) || [];
-let courses = JSON.parse(localStorage.getItem("courses")) || [];
+// ==================== GLOBAL VARIABLES ====================
+let students = [];
+let courses = [];
 let currentUser = null;
+let chartInstances = {};
 
-// Chart instances
-let studentsChart, coursesChart, performanceChart, deptChart, feeChart;
-
-// ========== UTILITY FUNCTIONS ==========
-function saveData() {
-    localStorage.setItem("students", JSON.stringify(students));
-    localStorage.setItem("courses", JSON.stringify(courses));
-}
-
-function showToast(msg) {
-    const toast = document.getElementById("toast");
-    toast.innerText = msg;
-    toast.style.display = "block";
-    setTimeout(() => toast.style.display = "none", 2000);
-}
-
-function showSection(id) {
-    document.querySelectorAll(".section").forEach(s => s.classList.remove("active"));
-    document.getElementById(id).classList.add("active");
-    
-    if (id === 'courses') {
-        searchCourse();
-        updateCourseStats();
-    } else if (id === 'students') {
-        renderStudents();
-    } else if (id === 'dashboard') {
-        updateCharts();
-    } else if (id === 'fees') {
-        renderDefaulters();
-        updateCharts();
-    } else if (id === 'allocate') {
-        updateQuickAllocate();
-    }
-}
-
-// Mobile menu toggle
-document.addEventListener('DOMContentLoaded', function() {
-    const menuToggle = document.getElementById('menuToggle');
-    if (menuToggle) {
-        menuToggle.addEventListener('click', function() {
-            document.getElementById('sidebar').classList.toggle('show');
-        });
-    }
-});
-
-// ========== AUTHENTICATION ==========
-function login() {
-    const u = document.getElementById("username").value;
-    const p = document.getElementById("password").value;
-    
-    if (u === "admin" && p === "admin123") {
-        currentUser = "admin";
-        document.getElementById("loginPage").classList.add("hidden");
-        document.getElementById("app").classList.remove("hidden");
-        document.getElementById("panelTitle").innerText = "Admin Panel";
-        document.getElementById("adminMenu").classList.remove("hidden");
-        document.getElementById("studentMenu").classList.add("hidden");
-        document.getElementById("studentPanel").classList.add("hidden");
-        document.getElementById("adminPanel").classList.remove("hidden");
-        
-        updateDashboard();
-        renderStudents();
-        renderCourses();
-        updateCourseStats();
-        initCharts();
-        showToast("Welcome Admin!");
-    } else {
-        const s = students.find(st => st.roll === u);
-        if (s) {
-            currentUser = s.roll;
-            document.getElementById("loginPage").classList.add("hidden");
-            document.getElementById("app").classList.remove("hidden");
-            document.getElementById("panelTitle").innerText = "Student Panel";
-            document.getElementById("adminMenu").classList.add("hidden");
-            document.getElementById("studentMenu").classList.remove("hidden");
-            document.getElementById("adminPanel").classList.add("hidden");
-            document.getElementById("studentPanel").classList.remove("hidden");
-            
-            showStudentDashboard();
-            showToast(`Welcome ${s.name}!`);
+// ==================== UTILITY FUNCTIONS ====================
+function showLoading(show = true) {
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) {
+        if (show) {
+            overlay.classList.remove('hidden');
         } else {
-            showToast("Invalid login credentials!");
+            overlay.classList.add('hidden');
         }
     }
 }
 
-function logout() {
-    location.reload();
+function showToast(message, type = 'success') {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.style.background = type === 'error' ? '#ff3d00' : '#00c853';
+    toast.style.display = 'block';
+    
+    setTimeout(() => {
+        toast.style.display = 'none';
+    }, 3000);
 }
 
-// ========== CGPA CALCULATION ==========
+function saveData() {
+    try {
+        localStorage.setItem('students', JSON.stringify(students));
+        localStorage.setItem('courses', JSON.stringify(courses));
+    } catch (error) {
+        showToast('Error saving data!', 'error');
+    }
+}
+
+function loadData() {
+    try {
+        const storedStudents = localStorage.getItem('students');
+        const storedCourses = localStorage.getItem('courses');
+        
+        students = storedStudents ? JSON.parse(storedStudents) : [];
+        courses = storedCourses ? JSON.parse(storedCourses) : [];
+        
+        // Initialize missing properties for backward compatibility
+        students.forEach(student => {
+            if (!student.courses) student.courses = [];
+            if (!student.grades) student.grades = [];
+            if (student.feePaid === undefined) student.feePaid = false;
+            if (!student.fineAmount) student.fineAmount = 0;
+            student.cgpa = calculateCGPA(student);
+        });
+        
+        saveData();
+    } catch (error) {
+        console.error('Error loading data:', error);
+        students = [];
+        courses = [];
+    }
+}
+
+// ==================== CGPA CALCULATION ====================
 function calculateCGPA(student) {
     if (!student.grades || student.grades.length === 0) return 0;
     
@@ -107,13 +79,13 @@ function calculateCGPA(student) {
     
     student.grades.forEach(grade => {
         const course = courses.find(c => c.code === grade.courseCode);
-        if (course) {
+        if (course && grade.gradePoint) {
             totalPoints += grade.gradePoint * course.credits;
             totalCredits += course.credits;
         }
     });
     
-    return totalCredits > 0 ? totalPoints / totalCredits : 0;
+    return totalCredits > 0 ? parseFloat((totalPoints / totalCredits).toFixed(2)) : 0;
 }
 
 function updateStudentCGPA(roll) {
@@ -131,34 +103,245 @@ function getGradeLetter(gradePoint) {
     return gradePoint.toString();
 }
 
-// ========== ADMIN FUNCTIONS ==========
-function updateDashboard() {
-    document.getElementById("totalStudents").innerText = students.length;
-    document.getElementById("totalCourses").innerText = courses.length;
-    updateCharts();
+function getGradePoint(letter) {
+    return GRADE_POINTS[letter] || 0;
 }
 
-function addStudent() {
-    const roll = document.getElementById("roll").value.trim();
-    const name = document.getElementById("name").value.trim();
-    const dept = document.getElementById("dept").value.trim();
-    const semester = document.getElementById("semester").value;
+// ==================== AUTHENTICATION ====================
+function login() {
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value;
     
-    if (!roll || !name || !dept || !semester) {
-        showToast("Please fill all fields!");
+    if (!username) {
+        showToast('Please enter username or roll number!', 'error');
+        return;
+    }
+    
+    if (username === 'admin' && password === 'admin123') {
+        currentUser = 'admin';
+        document.getElementById('loginPage').classList.add('hidden');
+        document.getElementById('app').classList.remove('hidden');
+        document.getElementById('panelTitle').textContent = 'Admin Panel';
+        document.getElementById('adminMenu').classList.remove('hidden');
+        document.getElementById('studentMenu').classList.add('hidden');
+        document.getElementById('adminPanel').classList.remove('hidden');
+        document.getElementById('studentPanel').classList.add('hidden');
+        
+        updateDashboardStats();
+        renderStudents();
+        renderCourses();
+        updateCourseStats();
+        initAllCharts();
+        showToast('Welcome Admin!');
+    } else {
+        const student = students.find(s => s.roll === username);
+        if (student) {
+            currentUser = student.roll;
+            document.getElementById('loginPage').classList.add('hidden');
+            document.getElementById('app').classList.remove('hidden');
+            document.getElementById('panelTitle').textContent = 'Student Panel';
+            document.getElementById('adminMenu').classList.add('hidden');
+            document.getElementById('studentMenu').classList.remove('hidden');
+            document.getElementById('adminPanel').classList.add('hidden');
+            document.getElementById('studentPanel').classList.remove('hidden');
+            
+            showStudentDashboard();
+            showToast(`Welcome ${student.name}!`);
+        } else {
+            showToast('Invalid credentials!', 'error');
+        }
+    }
+}
+
+function logout() {
+    currentUser = null;
+    location.reload();
+}
+
+// ==================== DASHBOARD FUNCTIONS ====================
+function updateDashboardStats() {
+    const totalStudents = students.length;
+    const totalCoursesCount = courses.length;
+    const totalRevenue = students.reduce((sum, s) => sum + (s.feePaid ? TUITION_FEE : 0), 0);
+    const avgCgpa = students.length > 0 
+        ? (students.reduce((sum, s) => sum + s.cgpa, 0) / students.length).toFixed(2)
+        : 0;
+    
+    document.getElementById('totalStudents').textContent = totalStudents;
+    document.getElementById('totalCourses').textContent = totalCoursesCount;
+    document.getElementById('totalRevenue').textContent = `₹${totalRevenue.toLocaleString()}`;
+    document.getElementById('avgCgpa').textContent = avgCgpa;
+}
+
+function initAllCharts() {
+    // Performance Chart
+    const perfCtx = document.getElementById('performanceChart')?.getContext('2d');
+    if (perfCtx && chartInstances.performance) chartInstances.performance.destroy();
+    if (perfCtx) {
+        const topStudents = [...students].sort((a, b) => b.cgpa - a.cgpa).slice(0, 10);
+        chartInstances.performance = new Chart(perfCtx, {
+            type: 'bar',
+            data: {
+                labels: topStudents.map(s => s.roll),
+                datasets: [{
+                    label: 'CGPA',
+                    data: topStudents.map(s => s.cgpa),
+                    backgroundColor: 'rgba(0, 198, 255, 0.6)',
+                    borderColor: '#00c6ff',
+                    borderWidth: 1,
+                    borderRadius: 5
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                scales: {
+                    y: { beginAtZero: true, max: 4, grid: { color: 'rgba(255,255,255,0.1)' } },
+                    x: { grid: { display: false } }
+                },
+                plugins: {
+                    legend: { labels: { color: '#ffffff' } }
+                }
+            }
+        });
+    }
+    
+    // Department Chart
+    const deptCtx = document.getElementById('deptChart')?.getContext('2d');
+    if (deptCtx && chartInstances.department) chartInstances.department.destroy();
+    if (deptCtx) {
+        const deptData = {};
+        students.forEach(s => {
+            deptData[s.department] = (deptData[s.department] || 0) + 1;
+        });
+        chartInstances.department = new Chart(deptCtx, {
+            type: 'pie',
+            data: {
+                labels: Object.keys(deptData),
+                datasets: [{
+                    data: Object.values(deptData),
+                    backgroundColor: ['#00c6ff', '#0072ff', '#00e5ff', '#00b0ff', '#0091ea']
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { labels: { color: '#ffffff' } }
+                }
+            }
+        });
+    }
+    
+    // Fee Chart
+    const feeCtx = document.getElementById('feeChart')?.getContext('2d');
+    if (feeCtx && chartInstances.fee) chartInstances.fee.destroy();
+    if (feeCtx) {
+        const paidCount = students.filter(s => s.feePaid).length;
+        const unpaidCount = students.length - paidCount;
+        chartInstances.fee = new Chart(feeCtx, {
+            type: 'pie',
+            data: {
+                labels: ['Paid', 'Unpaid'],
+                datasets: [{
+                    data: [paidCount || 1, unpaidCount || 1],
+                    backgroundColor: ['#00c853', '#ff3d00']
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { labels: { color: '#ffffff' } }
+                }
+            }
+        });
+    }
+    
+    // Grade Distribution Chart
+    const gradeDistCtx = document.getElementById('gradeDistributionChart')?.getContext('2d');
+    if (gradeDistCtx && chartInstances.gradeDistribution) chartInstances.gradeDistribution.destroy();
+    if (gradeDistCtx) {
+        const grades = ['A+', 'A', 'B+', 'B', 'C+', 'C', 'D', 'F'];
+        const distribution = new Array(8).fill(0);
+        
+        students.forEach(student => {
+            if (student.grades) {
+                student.grades.forEach(grade => {
+                    const letter = getGradeLetter(grade.gradePoint);
+                    const index = grades.indexOf(letter);
+                    if (index !== -1) distribution[index]++;
+                });
+            }
+        });
+        
+        chartInstances.gradeDistribution = new Chart(gradeDistCtx, {
+            type: 'bar',
+            data: {
+                labels: grades,
+                datasets: [{
+                    label: 'Number of Students',
+                    data: distribution,
+                    backgroundColor: 'rgba(108, 92, 231, 0.6)',
+                    borderColor: '#6c5ce7',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.1)' } },
+                    x: { grid: { display: false } }
+                },
+                plugins: {
+                    legend: { labels: { color: '#ffffff' } }
+                }
+            }
+        });
+    }
+    
+    // Fee Chart Summary
+    const feeSummaryCtx = document.getElementById('feeChartSummary')?.getContext('2d');
+    if (feeSummaryCtx && chartInstances.feeSummary) chartInstances.feeSummary.destroy();
+    if (feeSummaryCtx) {
+        const paidCount = students.filter(s => s.feePaid).length;
+        const unpaidCount = students.length - paidCount;
+        chartInstances.feeSummary = new Chart(feeSummaryCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Paid', 'Unpaid'],
+                datasets: [{
+                    data: [paidCount || 1, unpaidCount || 1],
+                    backgroundColor: ['#00c853', '#ff3d00']
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { labels: { color: '#ffffff' } }
+                }
+            }
+        });
+    }
+}
+
+// ==================== STUDENT MANAGEMENT ====================
+function addStudent() {
+    const roll = document.getElementById('roll').value.trim();
+    const name = document.getElementById('name').value.trim();
+    const department = document.getElementById('dept').value.trim();
+    const semester = parseInt(document.getElementById('semester').value);
+    
+    if (!roll || !name || !department || !semester) {
+        showToast('Please fill all fields!', 'error');
         return;
     }
     
     if (students.find(s => s.roll === roll)) {
-        showToast("Student already exists!");
+        showToast('Student already exists!', 'error');
         return;
     }
     
     students.push({
-        roll,
-        name,
-        department: dept,
-        semester: parseInt(semester),
+        roll, name, department, semester,
         courses: [],
         grades: [],
         cgpa: 0,
@@ -168,61 +351,94 @@ function addStudent() {
     
     saveData();
     renderStudents();
-    updateDashboard();
-    updateCharts();
-    showToast("Student added successfully!");
+    updateDashboardStats();
+    initAllCharts();
+    showToast('Student added successfully!');
     
-    // Clear inputs
-    document.getElementById("roll").value = "";
-    document.getElementById("name").value = "";
-    document.getElementById("dept").value = "";
-    document.getElementById("semester").value = "";
+    // Clear form
+    document.getElementById('roll').value = '';
+    document.getElementById('name').value = '';
+    document.getElementById('dept').value = '';
+    document.getElementById('semester').value = '';
 }
 
 function renderStudents() {
-    const tbody = document.querySelector("#studentTable tbody");
+    const tbody = document.querySelector('#studentTable tbody');
     if (!tbody) return;
     
-    tbody.innerHTML = "";
+    tbody.innerHTML = '';
+    const searchTerm = document.getElementById('searchRoll')?.value.toLowerCase() || '';
     
-    students.forEach(s => {
-        tbody.innerHTML += `<tr>
-            <td>${s.roll}</td>
-            <td>${s.name}</td>
-            <td>${s.department}</td>
-            <td>${s.semester}</td>
-            <td style="color: ${s.cgpa >= 3.0 ? '#00ff00' : s.cgpa >= 2.0 ? '#ffff00' : '#ff0000'}; font-weight: bold;">${s.cgpa.toFixed(2)}</td>
-            <td style="color: ${s.feePaid ? '#00ff00' : '#ff0000'};">${s.feePaid ? "Paid ✓" : "Unpaid ✗"}</td>
-            <td>₹${s.fineAmount || 0}</td>
-            <td>
-                <button onclick="editStudent('${s.roll}')" style="background:#00c853; padding:5px 10px;">Edit</button>
-                <button onclick="deleteStudent('${s.roll}')" style="background:#ff3d00; padding:5px 10px;">Delete</button>
-                <button onclick="viewStudentDetails('${s.roll}')" style="background:#0072ff; padding:5px 10px;">View</button>
+    const filteredStudents = students.filter(s => 
+        s.roll.toLowerCase().includes(searchTerm) ||
+        s.name.toLowerCase().includes(searchTerm) ||
+        s.department.toLowerCase().includes(searchTerm)
+    );
+    
+    filteredStudents.forEach(student => {
+        const cgpaColor = student.cgpa >= 3.0 ? '#00c853' : student.cgpa >= 2.0 ? '#ffa000' : '#ff3d00';
+        const feeStatusColor = student.feePaid ? '#00c853' : '#ff3d00';
+        
+        const row = tbody.insertRow();
+        row.innerHTML = `
+            <td>${student.roll}</td>
+            <td>${escapeHtml(student.name)}</td>
+            <td>${escapeHtml(student.department)}</td>
+            <td>${student.semester}</td>
+            <td style="color: ${cgpaColor}; font-weight: bold;">${student.cgpa.toFixed(2)}</td>
+            <td style="color: ${feeStatusColor};">${student.feePaid ? 'Paid ✓' : 'Unpaid ✗'}</td>
+            <td>₹${student.fineAmount || 0}</td>
+            <td class="action-buttons">
+                <button onclick="editStudent('${student.roll}')" class="btn-small btn-edit">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="deleteStudent('${student.roll}')" class="btn-small btn-delete">
+                    <i class="fas fa-trash"></i>
+                </button>
+                <button onclick="viewStudentDetails('${student.roll}')" class="btn-small btn-view">
+                    <i class="fas fa-eye"></i>
+                </button>
             </td>
-        </tr>`;
+        `;
     });
 }
 
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/[&<>]/g, function(m) {
+        if (m === '&') return '&amp;';
+        if (m === '<') return '&lt;';
+        if (m === '>') return '&gt;';
+        return m;
+    });
+}
+
+function searchStudent() {
+    renderStudents();
+}
+
 function deleteStudent(roll) {
-    if (confirm("Are you sure you want to delete this student? This action cannot be undone.")) {
+    if (confirm('Are you sure you want to delete this student? This action cannot be undone!')) {
         students = students.filter(s => s.roll !== roll);
         saveData();
         renderStudents();
-        updateDashboard();
-        updateCharts();
-        showToast("Student deleted successfully!");
+        updateDashboardStats();
+        initAllCharts();
+        updateQuickAllocate();
+        showToast('Student deleted successfully!');
     }
 }
 
 function editStudent(roll) {
     const student = students.find(s => s.roll === roll);
     if (student) {
-        document.getElementById("roll").value = student.roll;
-        document.getElementById("name").value = student.name;
-        document.getElementById("dept").value = student.department;
-        document.getElementById("semester").value = student.semester;
+        document.getElementById('roll').value = student.roll;
+        document.getElementById('name').value = student.name;
+        document.getElementById('dept').value = student.department;
+        document.getElementById('semester').value = student.semester;
         showSection('students');
-        showToast("Edit student details and click Add to update");
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        showToast('Edit student details and click Add to update');
     }
 }
 
@@ -230,393 +446,277 @@ function viewStudentDetails(roll) {
     const student = students.find(s => s.roll === roll);
     if (!student) return;
     
-    let html = `<h2>Student Details: ${student.name} (${student.roll})</h2>`;
-    html += `<p><strong>Department:</strong> ${student.department}</p>`;
-    html += `<p><strong>Semester:</strong> ${student.semester}</p>`;
-    html += `<p><strong>CGPA:</strong> ${student.cgpa.toFixed(2)}</p>`;
-    html += `<p><strong>Fee Status:</strong> ${student.feePaid ? 'Paid' : 'Unpaid'}</p>`;
-    html += `<p><strong>Fine Amount:</strong> ₹${student.fineAmount || 0}</p>`;
-    
-    html += `<h3>Enrolled Courses</h3>`;
-    if (student.courses && student.courses.length > 0) {
-        html += '<table><thead><tr><th>Code</th><th>Course</th><th>Credits</th><th>Grade</th></tr></thead><tbody>';
-        student.courses.forEach(code => {
-            const course = courses.find(c => c.code === code);
-            const grade = student.grades?.find(g => g.courseCode === code);
-            if (course) {
-                html += `<tr>
-                    <td>${course.code}</td>
-                    <td>${course.name}</td>
-                    <td>${course.credits}</td>
-                    <td>${grade ? getGradeLetter(grade.gradePoint) : 'Not Graded'}</td>
-                </tr>`;
-            }
-        });
-        html += '</tbody></table>';
-    } else {
-        html += '<p>No courses enrolled</p>';
-    }
-    
-    // Show in modal
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.innerHTML = `
         <div class="modal-content">
             <span class="close" onclick="this.parentElement.parentElement.remove()">&times;</span>
-            ${html}
+            <h2><i class="fas fa-user-graduate"></i> Student Details</h2>
+            <div class="student-detail">
+                <p><strong>Name:</strong> ${escapeHtml(student.name)}</p>
+                <p><strong>Roll Number:</strong> ${student.roll}</p>
+                <p><strong>Department:</strong> ${escapeHtml(student.department)}</p>
+                <p><strong>Semester:</strong> ${student.semester}</p>
+                <p><strong>CGPA:</strong> ${student.cgpa.toFixed(2)}</p>
+                <p><strong>Fee Status:</strong> ${student.feePaid ? 'Paid ✓' : 'Unpaid ✗'}</p>
+                <p><strong>Fine Amount:</strong> ₹${student.fineAmount || 0}</p>
+            </div>
+            <h3><i class="fas fa-book"></i> Enrolled Courses</h3>
+            ${renderStudentCourses(student)}
         </div>
     `;
     document.body.appendChild(modal);
 }
 
-function searchStudent() {
-    const searchTerm = document.getElementById("searchRoll").value.toLowerCase();
-    const tbody = document.querySelector("#studentTable tbody");
-    if (!tbody) return;
+function renderStudentCourses(student) {
+    if (!student.courses || student.courses.length === 0) {
+        return '<p>No courses enrolled.</p>';
+    }
     
-    tbody.innerHTML = "";
-    
-    students.filter(s => 
-        s.roll.toLowerCase().includes(searchTerm) || 
-        s.name.toLowerCase().includes(searchTerm) ||
-        s.department.toLowerCase().includes(searchTerm)
-    ).forEach(s => {
-        tbody.innerHTML += `<tr>
-            <td>${s.roll}</td>
-            <td>${s.name}</td>
-            <td>${s.department}</td>
-            <td>${s.semester}</td>
-            <td style="color: ${s.cgpa >= 3.0 ? '#00ff00' : s.cgpa >= 2.0 ? '#ffff00' : '#ff0000'};">${s.cgpa.toFixed(2)}</td>
-            <td style="color: ${s.feePaid ? '#00ff00' : '#ff0000'};">${s.feePaid ? "Paid" : "Unpaid"}</td>
-            <td>₹${s.fineAmount || 0}</td>
-            <td>
-                <button onclick="editStudent('${s.roll}')" style="background:#00c853;">Edit</button>
-                <button onclick="deleteStudent('${s.roll}')" style="background:#ff3d00;">Delete</button>
-                <button onclick="viewStudentDetails('${s.roll}')" style="background:#0072ff;">View</button>
-            </td>
-        </tr>`;
+    let html = '<table><thead><tr><th>Code</th><th>Course</th><th>Credits</th><th>Grade</th></tr></thead><tbody>';
+    student.courses.forEach(code => {
+        const course = courses.find(c => c.code === code);
+        const grade = student.grades?.find(g => g.courseCode === code);
+        if (course) {
+            html += `<tr>
+                <td>${course.code}</td>
+                <td>${escapeHtml(course.name)}</td>
+                <td>${course.credits}</td>
+                <td>${grade ? getGradeLetter(grade.gradePoint) : 'Not Graded'}</td>
+            </tr>`;
+        }
     });
+    html += '</tbody></table>';
+    return html;
 }
 
 function exportStudents() {
-    let csv = "Roll,Name,Department,Semester,CGPA,Fee Status,Fine Amount\n";
+    const headers = ['Roll Number', 'Name', 'Department', 'Semester', 'CGPA', 'Fee Status', 'Fine Amount'];
+    const rows = students.map(s => [
+        s.roll, s.name, s.department, s.semester, s.cgpa.toFixed(2),
+        s.feePaid ? 'Paid' : 'Unpaid', s.fineAmount || 0
+    ]);
     
-    students.forEach(s => {
-        csv += `${s.roll},${s.name},${s.department},${s.semester},${s.cgpa.toFixed(2)},${s.feePaid ? 'Paid' : 'Unpaid'},${s.fineAmount || 0}\n`;
-    });
-    
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'students.csv';
-    a.click();
-    showToast("Students exported successfully!");
+    downloadCSV(headers, rows, 'students_export.csv');
 }
 
-// ========== COURSE MANAGEMENT ==========
+// ==================== COURSE MANAGEMENT ====================
 function addCourse() {
-    const code = document.getElementById("courseCode").value.trim();
-    const name = document.getElementById("courseName").value.trim();
-    const credits = parseInt(document.getElementById("credits").value);
-    const teacher = document.getElementById("teacher").value.trim();
+    const code = document.getElementById('courseCode').value.trim().toUpperCase();
+    const name = document.getElementById('courseName').value.trim();
+    const credits = parseInt(document.getElementById('credits').value);
+    const teacher = document.getElementById('teacher').value.trim();
     
     if (!code || !name || !credits || !teacher) {
-        showToast("Please fill all fields!");
+        showToast('Please fill all fields!', 'error');
         return;
     }
     
     if (courses.find(c => c.code === code)) {
-        showToast("Course already exists!");
+        showToast('Course already exists!', 'error');
         return;
     }
     
-    courses.push({
-        code,
-        name,
-        credits,
-        teacher
-    });
-    
+    courses.push({ code, name, credits, teacher });
     saveData();
     renderCourses();
-    searchCourse();
     updateCourseStats();
-    updateDashboard();
-    updateCharts();
-    showToast("Course added successfully!");
+    updateDashboardStats();
+    initAllCharts();
+    updateQuickAllocate();
+    showToast('Course added successfully!');
     
-    // Clear inputs
-    document.getElementById("courseCode").value = "";
-    document.getElementById("courseName").value = "";
-    document.getElementById("credits").value = "";
-    document.getElementById("teacher").value = "";
+    // Clear form
+    document.getElementById('courseCode').value = '';
+    document.getElementById('courseName').value = '';
+    document.getElementById('credits').value = '';
+    document.getElementById('teacher').value = '';
 }
 
 function renderCourses() {
-    const tbody = document.querySelector("#courseTable tbody");
+    const tbody = document.querySelector('#courseTable tbody');
     if (!tbody) return;
     
-    tbody.innerHTML = "";
+    tbody.innerHTML = '';
+    const searchTerm = document.getElementById('searchCourse')?.value.toLowerCase() || '';
     
-    courses.forEach(c => {
-        const enrolledCount = students.filter(s => s.courses?.includes(c.code)).length;
-        
-        tbody.innerHTML += `<tr>
-            <td><input type="checkbox" class="course-checkbox" value="${c.code}" onchange="updateSelectAll()"></td>
-            <td>${c.code}</td>
-            <td>${c.name}</td>
-            <td>${c.credits}</td>
-            <td>${c.teacher}</td>
+    const filteredCourses = courses.filter(c => 
+        c.code.toLowerCase().includes(searchTerm) ||
+        c.name.toLowerCase().includes(searchTerm) ||
+        c.teacher.toLowerCase().includes(searchTerm)
+    );
+    
+    filteredCourses.forEach(course => {
+        const enrolledCount = students.filter(s => s.courses?.includes(course.code)).length;
+        const row = tbody.insertRow();
+        row.innerHTML = `
+            <td><input type="checkbox" class="course-checkbox" value="${course.code}"></td>
+            <td>${course.code}</td>
+            <td>${escapeHtml(course.name)}</td>
+            <td>${course.credits}</td>
+            <td>${escapeHtml(course.teacher)}</td>
             <td>${enrolledCount}</td>
-            <td>
-                <button onclick="deleteCourse('${c.code}')" style="background:#ff3d00; padding:5px 10px;">Delete</button>
-                <button onclick="editCourse('${c.code}')" style="background:#00c853; padding:5px 10px;">Edit</button>
-                <button onclick="viewEnrolledStudents('${c.code}')" style="background:#0072ff; padding:5px 10px;">View</button>
+            <td class="action-buttons">
+                <button onclick="editCourse('${course.code}')" class="btn-small btn-edit">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="deleteCourse('${course.code}')" class="btn-small btn-delete">
+                    <i class="fas fa-trash"></i>
+                </button>
+                <button onclick="viewEnrolledStudents('${course.code}')" class="btn-small btn-view">
+                    <i class="fas fa-users"></i>
+                </button>
             </td>
-        </tr>`;
+        `;
     });
 }
 
 function deleteCourse(code) {
-    if (confirm("Are you sure you want to delete this course?\nThis will remove the course from all students and their grades.")) {
-        // Remove course from all students
+    if (confirm('Are you sure you want to delete this course? This will remove it from all students!')) {
         students.forEach(student => {
-            if (student.courses) {
-                student.courses = student.courses.filter(c => c !== code);
-            }
-            if (student.grades) {
-                student.grades = student.grades.filter(g => g.courseCode !== code);
-            }
-            // Recalculate CGPA for affected students
+            student.courses = student.courses.filter(c => c !== code);
+            student.grades = student.grades.filter(g => g.courseCode !== code);
             student.cgpa = calculateCGPA(student);
         });
         
-        // Remove the course
         courses = courses.filter(c => c.code !== code);
-        
-        // Save changes
         saveData();
-        
-        // Update UI
         renderCourses();
-        searchCourse();
         updateCourseStats();
         renderStudents();
-        updateDashboard();
-        updateCharts();
-        
-        showToast("Course deleted successfully!");
+        updateDashboardStats();
+        initAllCharts();
+        updateQuickAllocate();
+        showToast('Course deleted successfully!');
     }
 }
 
 function editCourse(code) {
     const course = courses.find(c => c.code === code);
     if (course) {
-        document.getElementById("courseCode").value = course.code;
-        document.getElementById("courseName").value = course.name;
-        document.getElementById("credits").value = course.credits;
-        document.getElementById("teacher").value = course.teacher;
+        document.getElementById('courseCode').value = course.code;
+        document.getElementById('courseName').value = course.name;
+        document.getElementById('credits').value = course.credits;
+        document.getElementById('teacher').value = course.teacher;
         showSection('courses');
-        showToast("Edit course details and click Add to update");
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        showToast('Edit course details and click Add to update');
     }
 }
 
 function deleteMultipleCourses() {
-    const selectedCourses = [];
-    document.querySelectorAll('.course-checkbox:checked').forEach(cb => {
-        selectedCourses.push(cb.value);
-    });
-    
-    if (selectedCourses.length === 0) {
-        showToast("No courses selected!");
+    const selected = Array.from(document.querySelectorAll('.course-checkbox:checked')).map(cb => cb.value);
+    if (selected.length === 0) {
+        showToast('No courses selected!', 'error');
         return;
     }
     
-    if (confirm(`Are you sure you want to delete ${selectedCourses.length} course(s)?`)) {
-        selectedCourses.forEach(code => {
-            // Remove from students
+    if (confirm(`Delete ${selected.length} course(s)? This will remove them from all students!`)) {
+        selected.forEach(code => {
             students.forEach(student => {
-                if (student.courses) {
-                    student.courses = student.courses.filter(c => c !== code);
-                }
-                if (student.grades) {
-                    student.grades = student.grades.filter(g => g.courseCode !== code);
-                }
+                student.courses = student.courses.filter(c => c !== code);
+                student.grades = student.grades.filter(g => g.courseCode !== code);
                 student.cgpa = calculateCGPA(student);
             });
-            
-            // Remove courses
             courses = courses.filter(c => c.code !== code);
         });
         
         saveData();
         renderCourses();
-        searchCourse();
         updateCourseStats();
         renderStudents();
-        updateDashboard();
-        updateCharts();
-        showToast(`${selectedCourses.length} course(s) deleted!`);
+        updateDashboardStats();
+        initAllCharts();
+        updateQuickAllocate();
+        showToast(`${selected.length} course(s) deleted successfully!`);
     }
 }
 
 function searchCourse() {
-    const searchTerm = document.getElementById('searchCourse')?.value.toLowerCase() || '';
-    const tbody = document.querySelector("#courseTable tbody");
-    if (!tbody) return;
-    
-    tbody.innerHTML = "";
-    
-    courses.filter(c => 
-        c.code.toLowerCase().includes(searchTerm) || 
-        c.name.toLowerCase().includes(searchTerm) ||
-        c.teacher.toLowerCase().includes(searchTerm)
-    ).forEach(c => {
-        const enrolledCount = students.filter(s => s.courses?.includes(c.code)).length;
-        
-        tbody.innerHTML += `<tr>
-            <td><input type="checkbox" class="course-checkbox" value="${c.code}" onchange="updateSelectAll()"></td>
-            <td>${c.code}</td>
-            <td>${c.name}</td>
-            <td>${c.credits}</td>
-            <td>${c.teacher}</td>
-            <td>${enrolledCount}</td>
-            <td>
-                <button onclick="deleteCourse('${c.code}')" style="background:#ff3d00; padding:5px 10px;">Delete</button>
-                <button onclick="editCourse('${c.code}')" style="background:#00c853; padding:5px 10px;">Edit</button>
-                <button onclick="viewEnrolledStudents('${c.code}')" style="background:#0072ff; padding:5px 10px;">View</button>
-            </td>
-        </tr>`;
-    });
-    
+    renderCourses();
     updateCourseStats();
 }
 
-function filterCoursesByDept() {
-    searchCourse();
+function updateCourseStats() {
+    const totalCourses = courses.length;
+    const totalCredits = courses.reduce((sum, c) => sum + c.credits, 0);
+    const avgCredits = totalCourses > 0 ? (totalCredits / totalCourses).toFixed(1) : 0;
+    
+    document.getElementById('totalCoursesCount').textContent = totalCourses;
+    document.getElementById('totalCreditsCount').textContent = totalCredits;
+    document.getElementById('avgCredits').textContent = avgCredits;
+}
+
+function toggleSelectAll(checkbox) {
+    document.querySelectorAll('.course-checkbox').forEach(cb => cb.checked = checkbox.checked);
 }
 
 function viewEnrolledStudents(courseCode) {
     const course = courses.find(c => c.code === courseCode);
     const enrolledStudents = students.filter(s => s.courses?.includes(courseCode));
     
-    let html = `<h2>Students Enrolled in ${course.name} (${course.code})</h2>`;
-    html += `<p style="font-size: 18px;">Total: <strong>${enrolledStudents.length}</strong> students</p>`;
-    
-    if (enrolledStudents.length > 0) {
-        html += '<table><thead><tr><th>Roll</th><th>Name</th><th>Department</th><th>Semester</th><th>CGPA</th><th>Action</th></tr></thead><tbody>';
-        
-        enrolledStudents.forEach(s => {
-            const grade = s.grades?.find(g => g.courseCode === courseCode);
-            const gradeLetter = grade ? getGradeLetter(grade.gradePoint) : 'Not Graded';
-            
-            html += `<tr>
-                <td>${s.roll}</td>
-                <td>${s.name}</td>
-                <td>${s.department}</td>
-                <td>${s.semester}</td>
-                <td>${s.cgpa.toFixed(2)} (${gradeLetter})</td>
-                <td>
-                    <button onclick="removeCourseFromStudent('${s.roll}', '${courseCode}')" style="background:#ff3d00;">Remove</button>
-                </td>
-            </tr>`;
-        });
-        
-        html += '</tbody></table>';
-    } else {
-        html += '<p>No students enrolled in this course.</p>';
-    }
-    
-    // Show in modal
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.innerHTML = `
         <div class="modal-content">
             <span class="close" onclick="this.parentElement.parentElement.remove()">&times;</span>
-            ${html}
+            <h2><i class="fas fa-users"></i> Students in ${course.name} (${course.code})</h2>
+            <p><strong>Total:</strong> ${enrolledStudents.length} students</p>
+            ${enrolledStudents.length > 0 ? `
+                <table>
+                    <thead>
+                        <tr><th>Roll</th><th>Name</th><th>Department</th><th>Grade</th><th>Action</th></tr>
+                    </thead>
+                    <tbody>
+                        ${enrolledStudents.map(s => {
+                            const grade = s.grades?.find(g => g.courseCode === courseCode);
+                            return `<tr>
+                                <td>${s.roll}</td>
+                                <td>${escapeHtml(s.name)}</td>
+                                <td>${escapeHtml(s.department)}</td>
+                                <td>${grade ? getGradeLetter(grade.gradePoint) : 'Not Graded'}</td>
+                                <td><button onclick="removeCourseFromStudent('${s.roll}', '${courseCode}')" class="btn-small btn-delete">Remove</button></td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+            ` : '<p>No students enrolled.</p>'}
         </div>
     `;
     document.body.appendChild(modal);
 }
 
 function removeCourseFromStudent(roll, courseCode) {
-    if (confirm("Remove this course from student?")) {
+    if (confirm('Remove this course from student?')) {
         const student = students.find(s => s.roll === roll);
         if (student) {
-            // Remove from enrolled courses
             student.courses = student.courses.filter(c => c !== courseCode);
-            
-            // Remove grades for this course
-            if (student.grades) {
-                student.grades = student.grades.filter(g => g.courseCode !== courseCode);
-            }
-            
-            // Recalculate CGPA
+            student.grades = student.grades.filter(g => g.courseCode !== courseCode);
             student.cgpa = calculateCGPA(student);
-            
             saveData();
             renderStudents();
-            viewEnrolledStudents(courseCode); // Refresh the view
-            showToast("Course removed from student!");
+            viewEnrolledStudents(courseCode);
+            showToast('Course removed from student!');
         }
     }
 }
 
-function updateCourseStats() {
-    const totalCourses = courses.length;
-    const totalCredits = courses.reduce((sum, c) => sum + (c.credits || 0), 0);
-    const avgCredits = totalCourses > 0 ? (totalCredits / totalCourses).toFixed(1) : 0;
-    
-    const totalCoursesEl = document.getElementById('totalCoursesCount');
-    const totalCreditsEl = document.getElementById('totalCreditsCount');
-    const avgCreditsEl = document.getElementById('avgCredits');
-    
-    if (totalCoursesEl) totalCoursesEl.innerText = totalCourses;
-    if (totalCreditsEl) totalCreditsEl.innerText = totalCredits;
-    if (avgCreditsEl) avgCreditsEl.innerText = avgCredits;
-}
-
-function toggleSelectAll(checkbox) {
-    document.querySelectorAll('.course-checkbox').forEach(cb => {
-        cb.checked = checkbox.checked;
-    });
-}
-
-function updateSelectAll() {
-    const checkboxes = document.querySelectorAll('.course-checkbox');
-    const selectAll = document.getElementById('selectAllCourses');
-    if (selectAll) {
-        selectAll.checked = Array.from(checkboxes).every(cb => cb.checked);
-        selectAll.indeterminate = Array.from(checkboxes).some(cb => cb.checked) && 
-                                 !Array.from(checkboxes).every(cb => cb.checked);
-    }
-}
-
 function exportCourses() {
-    let csv = "Code,Name,Credits,Teacher,Students Enrolled\n";
-    
-    courses.forEach(c => {
-        const enrolledCount = students.filter(s => s.courses?.includes(c.code)).length;
-        csv += `${c.code},${c.name},${c.credits},${c.teacher},${enrolledCount}\n`;
-    });
-    
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'courses.csv';
-    a.click();
-    showToast("Courses exported successfully!");
+    const headers = ['Course Code', 'Course Name', 'Credits', 'Teacher', 'Students Enrolled'];
+    const rows = courses.map(c => [
+        c.code, c.name, c.credits, c.teacher,
+        students.filter(s => s.courses?.includes(c.code)).length
+    ]);
+    downloadCSV(headers, rows, 'courses_export.csv');
 }
 
-// ========== COURSE ALLOCATION ==========
+// ==================== COURSE ALLOCATION ====================
 function allocateCourse() {
-    const roll = document.getElementById("allocRoll").value.trim();
-    const code = document.getElementById("allocCode").value.trim();
+    const roll = document.getElementById('allocRoll').value.trim();
+    const code = document.getElementById('allocCode').value.trim().toUpperCase();
     
     if (!roll || !code) {
-        showToast("Please enter both roll number and course code!");
+        showToast('Please enter both roll number and course code!', 'error');
         return;
     }
     
@@ -624,52 +724,51 @@ function allocateCourse() {
     const course = courses.find(c => c.code === code);
     
     if (!student) {
-        showToast("Student not found!");
+        showToast('Student not found!', 'error');
         return;
     }
     
     if (!course) {
-        showToast("Course not found!");
+        showToast('Course not found!', 'error');
         return;
     }
     
     if (!student.courses) student.courses = [];
     
     if (student.courses.includes(code)) {
-        showToast("Course already allocated to this student!");
+        showToast('Course already allocated!', 'error');
         return;
     }
     
-    const totalCredits = student.courses
+    const currentCredits = student.courses
         .map(c => courses.find(x => x.code === c)?.credits || 0)
         .reduce((a, b) => a + b, 0);
     
-    if (totalCredits + course.credits > MAX_CREDITS) {
-        showToast(`Credit limit exceeded! Max credits: ${MAX_CREDITS}`);
+    if (currentCredits + course.credits > MAX_CREDITS) {
+        showToast(`Credit limit exceeded! Max ${MAX_CREDITS} credits. Current: ${currentCredits}`, 'error');
         return;
     }
     
     student.courses.push(code);
     saveData();
     
-    document.getElementById("allocRoll").value = "";
-    document.getElementById("allocCode").value = "";
-    
+    document.getElementById('allocRoll').value = '';
+    document.getElementById('allocCode').value = '';
     updateQuickAllocate();
     showToast(`Course allocated to ${student.name} successfully!`);
 }
 
 function quickAllocate() {
-    const studentSelect = document.getElementById('quickStudent');
-    const courseSelect = document.getElementById('quickCourse');
+    const roll = document.getElementById('quickStudent').value;
+    const code = document.getElementById('quickCourse').value;
     
-    if (!studentSelect.value || !courseSelect.value) {
-        showToast("Please select both student and course!");
+    if (!roll || !code) {
+        showToast('Please select both student and course!', 'error');
         return;
     }
     
-    document.getElementById('allocRoll').value = studentSelect.value;
-    document.getElementById('allocCode').value = courseSelect.value;
+    document.getElementById('allocRoll').value = roll;
+    document.getElementById('allocCode').value = code;
     allocateCourse();
 }
 
@@ -678,28 +777,24 @@ function updateQuickAllocate() {
     const courseSelect = document.getElementById('quickCourse');
     
     if (studentSelect) {
-        studentSelect.innerHTML = '<option value="">Select Student</option>';
-        students.forEach(s => {
-            studentSelect.innerHTML += `<option value="${s.roll}">${s.roll} - ${s.name}</option>`;
-        });
+        studentSelect.innerHTML = '<option value="">Select Student</option>' +
+            students.map(s => `<option value="${s.roll}">${s.roll} - ${escapeHtml(s.name)} (Sem ${s.semester})</option>`).join('');
     }
     
     if (courseSelect) {
-        courseSelect.innerHTML = '<option value="">Select Course</option>';
-        courses.forEach(c => {
-            courseSelect.innerHTML += `<option value="${c.code}">${c.code} - ${c.name} (${c.credits} credits)</option>`;
-        });
+        courseSelect.innerHTML = '<option value="">Select Course</option>' +
+            courses.map(c => `<option value="${c.code}">${c.code} - ${escapeHtml(c.name)} (${c.credits} credits)</option>`).join('');
     }
 }
 
-// ========== GRADE MANAGEMENT ==========
+// ==================== GRADE MANAGEMENT ====================
 function addGrade() {
-    const roll = document.getElementById("gradeRoll").value.trim();
-    const courseCode = document.getElementById("gradeCode").value.trim();
-    const gradePoint = parseFloat(document.getElementById("gradeSelect").value);
+    const roll = document.getElementById('gradeRoll').value.trim();
+    const courseCode = document.getElementById('gradeCode').value.trim().toUpperCase();
+    const gradePoint = parseFloat(document.getElementById('gradeSelect').value);
     
     if (!roll || !courseCode) {
-        showToast("Please enter roll number and course code!");
+        showToast('Please enter roll number and course code!', 'error');
         return;
     }
     
@@ -707,65 +802,74 @@ function addGrade() {
     const course = courses.find(c => c.code === courseCode);
     
     if (!student) {
-        showToast("Student not found!");
+        showToast('Student not found!', 'error');
         return;
     }
     
     if (!course) {
-        showToast("Course not found!");
+        showToast('Course not found!', 'error');
         return;
     }
     
-    if (!student.courses || !student.courses.includes(courseCode)) {
-        showToast("Student is not enrolled in this course!");
+    if (!student.courses?.includes(courseCode)) {
+        showToast('Student is not enrolled in this course!', 'error');
         return;
     }
     
     if (!student.grades) student.grades = [];
     
-    // Update or add grade
     const existingGrade = student.grades.find(g => g.courseCode === courseCode);
     if (existingGrade) {
         existingGrade.gradePoint = gradePoint;
-        showToast("Grade updated successfully!");
+        showToast('Grade updated successfully!');
     } else {
         student.grades.push({ courseCode, gradePoint });
-        showToast("Grade assigned successfully!");
+        showToast('Grade assigned successfully!');
     }
     
-    // Update CGPA
     updateStudentCGPA(roll);
-    
     saveData();
     renderStudents();
-    document.getElementById("gradeRoll").value = "";
-    document.getElementById("gradeCode").value = "";
+    
+    document.getElementById('gradeRoll').value = '';
+    document.getElementById('gradeCode').value = '';
 }
 
 function showGradeReport() {
-    const roll = document.getElementById("gradeReportRoll").value.trim();
+    const roll = document.getElementById('gradeReportRoll').value.trim();
     const student = students.find(s => s.roll === roll);
     
     if (!student) {
-        document.getElementById("gradeReport").innerHTML = "<p style='color: #ff6b6b;'>Student not found!</p>";
+        document.getElementById('gradeReport').innerHTML = '<p class="error">Student not found!</p>';
         return;
     }
     
-    let html = `<div style="background: rgba(0,198,255,0.1); padding: 20px; border-radius: 10px;">`;
-    html += `<h3 style="color: #00c6ff; margin-bottom: 15px;">Grade Report - ${student.name} (${student.roll})</h3>`;
-    html += `<p style="font-size: 18px;"><strong>CGPA:</strong> <span style="color: ${student.cgpa >= 3.0 ? '#00ff00' : student.cgpa >= 2.0 ? '#ffff00' : '#ff0000'}; font-size: 24px;">${student.cgpa.toFixed(2)}</span></p>`;
+    let html = `
+        <div class="grade-report-header">
+            <h3>Grade Report - ${escapeHtml(student.name)}</h3>
+            <p><strong>Roll Number:</strong> ${student.roll}</p>
+            <p><strong>Department:</strong> ${escapeHtml(student.department)}</p>
+            <p><strong>Semester:</strong> ${student.semester}</p>
+            <p><strong>CGPA:</strong> <span class="cgpa-value">${student.cgpa.toFixed(2)}</span></p>
+        </div>
+    `;
     
     if (student.courses && student.courses.length > 0) {
-        html += '<table><thead><tr><th>Course Code</th><th>Course Name</th><th>Credits</th><th>Grade</th><th>Grade Points</th></tr></thead><tbody>';
+        html += `
+            <table class="grade-table">
+                <thead>
+                    <tr><th>Course Code</th><th>Course Name</th><th>Credits</th><th>Grade</th><th>Grade Points</th></tr>
+                </thead>
+                <tbody>
+        `;
         
         student.courses.forEach(code => {
             const course = courses.find(c => c.code === code);
             const grade = student.grades?.find(g => g.courseCode === code);
-            
             if (course) {
                 html += `<tr>
                     <td>${course.code}</td>
-                    <td>${course.name}</td>
+                    <td>${escapeHtml(course.name)}</td>
                     <td>${course.credits}</td>
                     <td>${grade ? getGradeLetter(grade.gradePoint) : 'Not Graded'}</td>
                     <td>${grade ? grade.gradePoint : '-'}</td>
@@ -773,37 +877,39 @@ function showGradeReport() {
             }
         });
         
-        html += '</tbody></table>';
+        html += `</tbody></table>`;
     } else {
         html += '<p>No courses enrolled.</p>';
     }
     
-    html += '</div>';
-    document.getElementById("gradeReport").innerHTML = html;
+    document.getElementById('gradeReport').innerHTML = html;
 }
 
 function printGradeReport() {
-    const roll = document.getElementById("gradeReportRoll").value;
+    const roll = document.getElementById('gradeReportRoll').value;
     if (!roll) {
-        showToast("Please enter a roll number!");
+        showToast('Please enter a roll number!', 'error');
         return;
     }
     
     const student = students.find(s => s.roll === roll);
     if (!student) {
-        showToast("Student not found!");
+        showToast('Student not found!', 'error');
         return;
     }
     
-    let printContent = `<html>
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
         <head>
             <title>Grade Report - ${student.name}</title>
             <style>
-                body { font-family: Arial, sans-serif; padding: 30px; }
+                body { font-family: Arial, sans-serif; padding: 40px; }
                 h1 { color: #00c6ff; }
-                .header { margin-bottom: 30px; }
+                .header { margin-bottom: 30px; border-bottom: 2px solid #00c6ff; padding-bottom: 20px; }
                 table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-                th { background: #00c6ff; color: white; padding: 10px; }
+                th { background: #00c6ff; color: white; padding: 10px; text-align: left; }
                 td { border: 1px solid #ddd; padding: 10px; }
                 .cgpa { font-size: 24px; font-weight: bold; color: #00c6ff; }
             </style>
@@ -811,50 +917,38 @@ function printGradeReport() {
         <body>
             <h1>Student Grade Report</h1>
             <div class="header">
-                <p><strong>Name:</strong> ${student.name}</p>
+                <p><strong>Name:</strong> ${escapeHtml(student.name)}</p>
                 <p><strong>Roll Number:</strong> ${student.roll}</p>
-                <p><strong>Department:</strong> ${student.department}</p>
+                <p><strong>Department:</strong> ${escapeHtml(student.department)}</p>
                 <p><strong>Semester:</strong> ${student.semester}</p>
                 <p><strong>CGPA:</strong> <span class="cgpa">${student.cgpa.toFixed(2)}</span></p>
             </div>
             <table>
-                <thead>
-                    <tr>
-                        <th>Course Code</th>
-                        <th>Course Name</th>
-                        <th>Credits</th>
-                        <th>Grade</th>
-                        <th>Grade Points</th>
-                    </tr>
-                </thead>
-                <tbody>`;
-    
-    student.courses?.forEach(code => {
-        const course = courses.find(c => c.code === code);
-        const grade = student.grades?.find(g => g.courseCode === code);
-        
-        if (course) {
-            printContent += `<tr>
-                <td>${course.code}</td>
-                <td>${course.name}</td>
-                <td>${course.credits}</td>
-                <td>${grade ? getGradeLetter(grade.gradePoint) : 'Not Graded'}</td>
-                <td>${grade ? grade.gradePoint : '-'}</td>
-            </tr>`;
-        }
-    });
-    
-    printContent += `</tbody></table></body></html>`;
-    
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(printContent);
+                <thead><tr><th>Course Code</th><th>Course Name</th><th>Credits</th><th>Grade</th><th>Grade Points</th></tr></thead>
+                <tbody>
+                    ${student.courses?.map(code => {
+                        const course = courses.find(c => c.code === code);
+                        const grade = student.grades?.find(g => g.courseCode === code);
+                        return `<tr>
+                            <td>${code}</td>
+                            <td>${course?.name || code}</td>
+                            <td>${course?.credits || '-'}</td>
+                            <td>${grade ? getGradeLetter(grade.gradePoint) : 'Not Graded'}</td>
+                            <td>${grade ? grade.gradePoint : '-'}</td>
+                        </tr>`;
+                    }).join('') || '<tr><td colspan="5">No courses enrolled</td></tr>'}
+                </tbody>
+            </table>
+        </body>
+        </html>
+    `);
     printWindow.document.close();
     printWindow.print();
 }
 
-// ========== FEES MANAGEMENT ==========
+// ==================== FEE MANAGEMENT ====================
 function markPaid() {
-    const roll = document.getElementById("feeRoll").value.trim();
+    const roll = document.getElementById('feeRoll').value.trim();
     const student = students.find(s => s.roll === roll);
     
     if (student) {
@@ -862,15 +956,17 @@ function markPaid() {
         saveData();
         renderStudents();
         renderDefaulters();
-        updateCharts();
-        showToast(`${student.name}'s fee marked as paid`);
+        updateDashboardStats();
+        initAllCharts();
+        showToast(`${student.name}'s fee marked as paid!`);
+        document.getElementById('feeRoll').value = '';
     } else {
-        showToast("Student not found!");
+        showToast('Student not found!', 'error');
     }
 }
 
 function markUnpaid() {
-    const roll = document.getElementById("feeRoll").value.trim();
+    const roll = document.getElementById('feeRoll').value.trim();
     const student = students.find(s => s.roll === roll);
     
     if (student) {
@@ -878,19 +974,21 @@ function markUnpaid() {
         saveData();
         renderStudents();
         renderDefaulters();
-        updateCharts();
-        showToast(`${student.name}'s fee marked as unpaid`);
+        updateDashboardStats();
+        initAllCharts();
+        showToast(`${student.name}'s fee marked as unpaid!`);
+        document.getElementById('feeRoll').value = '';
     } else {
-        showToast("Student not found!");
+        showToast('Student not found!', 'error');
     }
 }
 
 function addFine() {
-    const roll = document.getElementById("feeRoll").value.trim();
-    const fine = parseFloat(document.getElementById("fineAmount").value);
+    const roll = document.getElementById('feeRoll').value.trim();
+    const fine = parseFloat(document.getElementById('fineAmount').value);
     
     if (!fine || fine <= 0) {
-        showToast("Please enter a valid fine amount!");
+        showToast('Please enter a valid fine amount!', 'error');
         return;
     }
     
@@ -901,30 +999,32 @@ function addFine() {
         renderStudents();
         renderDefaulters();
         showToast(`Fine of ₹${fine} added to ${student.name}`);
-        document.getElementById("fineAmount").value = "";
+        document.getElementById('fineAmount').value = '';
     } else {
-        showToast("Student not found!");
+        showToast('Student not found!', 'error');
     }
 }
 
 function renderDefaulters() {
-    const tbody = document.querySelector("#defaultersTable tbody");
+    const tbody = document.querySelector('#defaultersTable tbody');
     if (!tbody) return;
     
-    tbody.innerHTML = "";
-    
+    tbody.innerHTML = '';
     const defaulters = students.filter(s => !s.feePaid || (s.fineAmount && s.fineAmount > 0));
     
-    defaulters.forEach(s => {
-        tbody.innerHTML += `<tr>
-            <td>${s.roll}</td>
-            <td>${s.name}</td>
-            <td>${s.department}</td>
-            <td style="color: #ff6b6b;">₹${s.fineAmount || 0}</td>
+    defaulters.forEach(student => {
+        const row = tbody.insertRow();
+        row.innerHTML = `
+            <td>${student.roll}</td>
+            <td>${escapeHtml(student.name)}</td>
+            <td>${escapeHtml(student.department)}</td>
+            <td style="color: #ff6b6b;">₹${student.fineAmount || 0}</td>
             <td>
-                <button onclick="document.getElementById('feeRoll').value='${s.roll}'; showSection('fees');" style="background:#00c6ff;">Mark Paid</button>
+                <button onclick="document.getElementById('feeRoll').value='${student.roll}'; showSection('fees');" class="btn-small btn-primary">
+                    <i class="fas fa-check"></i> Mark Paid
+                </button>
             </td>
-        </tr>`;
+        `;
     });
 }
 
@@ -932,43 +1032,56 @@ function downloadFeeReceipt() {
     const student = students.find(s => s.roll === currentUser);
     if (!student) return;
     
-    let receipt = `FEE RECEIPT\n`;
-    receipt += `============\n\n`;
-    receipt += `Date: ${new Date().toLocaleDateString()}\n`;
-    receipt += `Student: ${student.name} (${student.roll})\n`;
-    receipt += `Department: ${student.department}\n`;
-    receipt += `Semester: ${student.semester}\n\n`;
-    receipt += `Fee Status: ${student.feePaid ? 'PAID ✓' : 'UNPAID ✗'}\n`;
-    receipt += `Fine Amount: ₹${student.fineAmount || 0}\n\n`;
-    receipt += `Total Amount: ₹${student.feePaid ? '0' : '5000'} + ₹${student.fineAmount || 0}\n`;
-    receipt += `============\n`;
-    receipt += `Thank you!\n`;
+    const totalFees = student.feePaid ? 0 : TUITION_FEE;
+    const totalDue = totalFees + (student.fineAmount || 0);
+    
+    const receipt = `
+        =================================
+              FEE RECEIPT
+        =================================
+        Date: ${new Date().toLocaleString()}
+        =================================
+        Student Name: ${student.name}
+        Roll Number: ${student.roll}
+        Department: ${student.department}
+        Semester: ${student.semester}
+        =================================
+        Tuition Fee: ₹${TUITION_FEE}
+        Fee Status: ${student.feePaid ? 'PAID ✓' : 'UNPAID ✗'}
+        Fine Amount: ₹${student.fineAmount || 0}
+        =================================
+        Total Due: ₹${totalDue}
+        =================================
+        Thank you!
+    `;
     
     const blob = new Blob([receipt], { type: 'text/plain' });
-    const url = window.URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `fee_receipt_${student.roll}.txt`;
     a.click();
-    showToast("Receipt downloaded!");
+    URL.revokeObjectURL(url);
+    showToast('Receipt downloaded!');
 }
 
-// ========== STUDENT FUNCTIONS ==========
+// ==================== STUDENT FUNCTIONS ====================
 function showStudentDashboard() {
     const student = students.find(s => s.roll === currentUser);
     if (!student) return;
     
-    document.getElementById("studentInfo").innerHTML = `
-        <div style="text-align: left;">
-            <p style="font-size: 20px;"><strong>${student.name}</strong></p>
-            <p><strong>Roll:</strong> ${student.roll}</p>
-            <p><strong>Department:</strong> ${student.department}</p>
-            <p><strong>Semester:</strong> ${student.semester}</p>
-            <p><strong>CGPA:</strong> <span style="color: ${student.cgpa >= 3.0 ? '#00ff00' : student.cgpa >= 2.0 ? '#ffff00' : '#ff0000'}; font-size: 24px;">${student.cgpa.toFixed(2)}</span></p>
-        </div>
+    document.getElementById('welcomeMsg').innerHTML = `
+        <i class="fas fa-smile"></i> Hello, ${escapeHtml(student.name)}!
     `;
     
-    document.getElementById("cgpaDisplay").innerHTML = `CGPA: ${student.cgpa.toFixed(2)}`;
+    document.getElementById('studentInfo').innerHTML = `
+        <p><i class="fas fa-id-card"></i> <strong>Roll Number:</strong> ${student.roll}</p>
+        <p><i class="fas fa-building"></i> <strong>Department:</strong> ${escapeHtml(student.department)}</p>
+        <p><i class="fas fa-calendar"></i> <strong>Semester:</strong> ${student.semester}</p>
+        <p><i class="fas fa-chart-line"></i> <strong>CGPA:</strong> <span style="color: ${student.cgpa >= 3.0 ? '#00c853' : student.cgpa >= 2.0 ? '#ffa000' : '#ff3d00'}; font-size: 20px;">${student.cgpa.toFixed(2)}</span></p>
+    `;
+    
+    document.getElementById('cgpaDisplay').textContent = student.cgpa.toFixed(2);
     
     renderMyCourses();
     renderMyFees();
@@ -978,27 +1091,29 @@ function showStudentDashboard() {
 
 function renderMyCourses() {
     const student = students.find(s => s.roll === currentUser);
-    const tbody = document.querySelector("#myCourseTable tbody");
+    const tbody = document.querySelector('#myCourseTable tbody');
     if (!tbody) return;
     
-    tbody.innerHTML = "";
+    tbody.innerHTML = '';
     
     if (student.courses && student.courses.length > 0) {
         student.courses.forEach(code => {
-            const c = courses.find(cr => cr.code === code);
-            if (c) {
+            const course = courses.find(c => c.code === code);
+            if (course) {
                 const grade = student.grades?.find(g => g.courseCode === code);
                 const gradeLetter = grade ? getGradeLetter(grade.gradePoint) : 'Not Graded';
                 const gradePoint = grade ? grade.gradePoint : '-';
+                const gradeColor = grade ? (grade.gradePoint >= 3.0 ? '#00c853' : grade.gradePoint >= 2.0 ? '#ffa000' : '#ff3d00') : '#ffffff';
                 
-                tbody.innerHTML += `<tr>
-                    <td>${c.code}</td>
-                    <td>${c.name}</td>
-                    <td>${c.credits}</td>
-                    <td>${c.teacher}</td>
-                    <td style="color: ${grade ? grade.gradePoint >= 3.0 ? '#00ff00' : grade.gradePoint >= 2.0 ? '#ffff00' : '#ff0000' : '#ffffff'};">${gradeLetter}</td>
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                    <td>${course.code}</td>
+                    <td>${escapeHtml(course.name)}</td>
+                    <td>${course.credits}</td>
+                    <td>${escapeHtml(course.teacher)}</td>
+                    <td style="color: ${gradeColor}; font-weight: bold;">${gradeLetter}</td>
                     <td>${gradePoint}</td>
-                </tr>`;
+                `;
             }
         });
     } else {
@@ -1010,238 +1125,183 @@ function renderMyFees() {
     const student = students.find(s => s.roll === currentUser);
     if (!student) return;
     
-    const totalFees = student.feePaid ? 0 : 5000;
+    const totalFees = student.feePaid ? 0 : TUITION_FEE;
     const totalDue = totalFees + (student.fineAmount || 0);
     
-    document.getElementById("feeStatus").innerHTML = `
-        <div style="text-align: left;">
-            <p style="font-size: 20px;"><strong>Fee Status</strong></p>
-            <p>Status: <span style="color: ${student.feePaid ? '#00ff00' : '#ff0000'}; font-weight: bold;">${student.feePaid ? "PAID ✓" : "UNPAID ✗"}</span></p>
-            <p>Tuition Fee: <span style="color: ${student.feePaid ? '#00ff00' : '#ff0000'};">₹${totalFees}</span></p>
-            <p>Fine Amount: <span style="color: ${student.fineAmount > 0 ? '#ff0000' : '#ffffff'};">₹${student.fineAmount || 0}</span></p>
-            <p style="font-size: 18px;"><strong>Total Due: ₹${totalDue}</strong></p>
+    document.getElementById('feeStatus').innerHTML = `
+        <div class="fee-details">
+            <h3>Fee Details</h3>
+            <p><strong>Status:</strong> <span style="color: ${student.feePaid ? '#00c853' : '#ff3d00'};">${student.feePaid ? 'PAID ✓' : 'UNPAID ✗'}</span></p>
+            <p><strong>Tuition Fee:</strong> ₹${TUITION_FEE}</p>
+            <p><strong>Fine Amount:</strong> <span style="color: ${student.fineAmount > 0 ? '#ff3d00' : '#ffffff'};">₹${student.fineAmount || 0}</span></p>
+            <p class="total-due"><strong>Total Due:</strong> ₹${totalDue}</p>
         </div>
     `;
-}
-
-// ========== CHART FUNCTIONS ==========
-function initCharts() {
-    // Students Chart
-    const studentsCtx = document.getElementById('studentsChart')?.getContext('2d');
-    if (studentsCtx) {
-        studentsChart = new Chart(studentsCtx, {
-            type: 'doughnut',
-            data: {
-                labels: ['Total Students'],
-                datasets: [{
-                    data: [students.length, 1],
-                    backgroundColor: ['#00c6ff', 'rgba(255,255,255,0.1)'],
-                    borderWidth: 0
-                }]
-            },
-            options: {
-                cutout: '70%',
-                plugins: { legend: { display: false } }
-            }
-        });
-    }
-
-    // Courses Chart
-    const coursesCtx = document.getElementById('coursesChart')?.getContext('2d');
-    if (coursesCtx) {
-        coursesChart = new Chart(coursesCtx, {
-            type: 'doughnut',
-            data: {
-                labels: ['Total Courses'],
-                datasets: [{
-                    data: [courses.length, 1],
-                    backgroundColor: ['#0072ff', 'rgba(255,255,255,0.1)'],
-                    borderWidth: 0
-                }]
-            },
-            options: {
-                cutout: '70%',
-                plugins: { legend: { display: false } }
-            }
-        });
-    }
-
-    // Performance Chart
-    const perfCtx = document.getElementById('performanceChart')?.getContext('2d');
-    if (perfCtx && students.length > 0) {
-        performanceChart = new Chart(perfCtx, {
-            type: 'bar',
-            data: {
-                labels: students.slice(0, 10).map(s => s.roll),
-                datasets: [{
-                    label: 'CGPA',
-                    data: students.slice(0, 10).map(s => s.cgpa || 0),
-                    backgroundColor: '#00c6ff',
-                    borderColor: '#0072ff',
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                scales: { y: { beginAtZero: true, max: 4 } },
-                plugins: { legend: { display: false } }
-            }
-        });
-    }
-
-    // Department Chart
-    const deptCtx = document.getElementById('deptChart')?.getContext('2d');
-    if (deptCtx) {
-        const deptData = {};
-        students.forEach(s => {
-            deptData[s.department] = (deptData[s.department] || 0) + 1;
-        });
-        
-        deptChart = new Chart(deptCtx, {
-            type: 'pie',
-            data: {
-                labels: Object.keys(deptData).length > 0 ? Object.keys(deptData) : ['No Data'],
-                datasets: [{
-                    data: Object.keys(deptData).length > 0 ? Object.values(deptData) : [1],
-                    backgroundColor: ['#00c6ff', '#0072ff', '#00e5ff', '#00b0ff', '#0091ea'],
-                    borderWidth: 0
-                }]
-            }
-        });
-    }
-
-    // Fee Chart
-    const feeCtx = document.getElementById('feeChart')?.getContext('2d');
-    if (feeCtx) {
-        const paidCount = students.filter(s => s.feePaid).length;
-        const unpaidCount = students.length - paidCount;
-        
-        feeChart = new Chart(feeCtx, {
-            type: 'pie',
-            data: {
-                labels: ['Paid', 'Unpaid'],
-                datasets: [{
-                    data: [paidCount || 1, unpaidCount || 1],
-                    backgroundColor: ['#00c853', '#ff3d00'],
-                    borderWidth: 0
-                }]
-            }
-        });
-    }
 }
 
 function initStudentCharts() {
     const student = students.find(s => s.roll === currentUser);
     if (!student) return;
     
-    // Semester GPA Chart
     const semCtx = document.getElementById('semesterGPAChart')?.getContext('2d');
     if (semCtx) {
-        // This is a simplified version - you can add actual semester data tracking
-        const semGPAs = [];
+        if (chartInstances.semesterGPA) chartInstances.semesterGPA.destroy();
+        
+        const semesterData = [];
         for (let i = 1; i <= student.semester; i++) {
-            semGPAs.push(student.cgpa * (i / student.semester)); // Sample data
+            semesterData.push({
+                semester: i,
+                gpa: student.cgpa * (i / student.semester)
+            });
         }
-
-        new Chart(semCtx, {
+        
+        chartInstances.semesterGPA = new Chart(semCtx, {
             type: 'line',
             data: {
-                labels: Array.from({length: student.semester}, (_, i) => `Sem ${i+1}`),
+                labels: semesterData.map(d => `Semester ${d.semester}`),
                 datasets: [{
-                    label: 'Semester GPA',
-                    data: semGPAs,
+                    label: 'GPA Progress',
+                    data: semesterData.map(d => d.gpa),
                     borderColor: '#00c6ff',
-                    backgroundColor: 'rgba(0,198,255,0.1)',
+                    backgroundColor: 'rgba(0, 198, 255, 0.1)',
                     tension: 0.4,
-                    fill: true
+                    fill: true,
+                    pointBackgroundColor: '#00c6ff',
+                    pointBorderColor: '#ffffff',
+                    pointRadius: 5,
+                    pointHoverRadius: 7
                 }]
             },
             options: {
-                scales: { y: { beginAtZero: true, max: 4 } },
-                plugins: { tooltip: { enabled: true } }
+                responsive: true,
+                maintainAspectRatio: true,
+                scales: {
+                    y: { 
+                        beginAtZero: true, 
+                        max: 4,
+                        grid: { color: 'rgba(255,255,255,0.1)' }
+                    },
+                    x: { 
+                        grid: { display: false }
+                    }
+                },
+                plugins: {
+                    legend: { labels: { color: '#ffffff' } },
+                    tooltip: { callbacks: { label: (ctx) => `GPA: ${ctx.raw.toFixed(2)}` } }
+                }
             }
         });
     }
 }
 
-function updateCharts() {
-    if (studentsChart) {
-        studentsChart.data.datasets[0].data = [students.length, 1];
-        studentsChart.update();
-    }
+// ==================== HELPER FUNCTIONS ====================
+function downloadCSV(headers, rows, filename) {
+    const csvContent = [
+        headers.join(','),
+        ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n');
     
-    if (coursesChart) {
-        coursesChart.data.datasets[0].data = [courses.length, 1];
-        coursesChart.update();
-    }
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    showToast('Export completed!');
+}
+
+function showSection(id) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
     
-    if (performanceChart && students.length > 0) {
-        performanceChart.data.labels = students.slice(0, 10).map(s => s.roll);
-        performanceChart.data.datasets[0].data = students.slice(0, 10).map(s => s.cgpa || 0);
-        performanceChart.update();
-    }
-    
-    if (deptChart) {
-        const deptData = {};
-        students.forEach(s => {
-            deptData[s.department] = (deptData[s.department] || 0) + 1;
-        });
-        deptChart.data.labels = Object.keys(deptData).length > 0 ? Object.keys(deptData) : ['No Data'];
-        deptChart.data.datasets[0].data = Object.keys(deptData).length > 0 ? Object.values(deptData) : [1];
-        deptChart.update();
-    }
-    
-    if (feeChart) {
-        const paidCount = students.filter(s => s.feePaid).length;
-        const unpaidCount = students.length - paidCount;
-        feeChart.data.datasets[0].data = [paidCount || 1, unpaidCount || 1];
-        feeChart.update();
+    switch(id) {
+        case 'dashboard':
+            updateDashboardStats();
+            initAllCharts();
+            break;
+        case 'students':
+            renderStudents();
+            break;
+        case 'courses':
+            renderCourses();
+            updateCourseStats();
+            break;
+        case 'fees':
+            renderDefaulters();
+            initAllCharts();
+            break;
+        case 'allocate':
+            updateQuickAllocate();
+            break;
+        case 'studentDashboard':
+            showStudentDashboard();
+            break;
+        case 'myCourses':
+            renderMyCourses();
+            break;
+        case 'myFees':
+            renderMyFees();
+            break;
     }
 }
 
-// ========== INITIALIZATION ==========
-document.addEventListener('DOMContentLoaded', function() {
-    // Initialize data
-    renderStudents();
-    renderCourses();
-    updateCourseStats();
-    renderDefaulters();
-    updateQuickAllocate();
-    
-    // Add sample data if empty
-    if (students.length === 0) {
-        addSampleData();
-    }
-});
-
+// ==================== INITIALIZATION ====================
 function addSampleData() {
-    // Add sample courses
-    if (courses.length === 0) {
+    if (students.length === 0 && courses.length === 0) {
         courses.push(
             { code: 'CS101', name: 'Computer Programming', credits: 4, teacher: 'Dr. Smith' },
             { code: 'CS201', name: 'Data Structures', credits: 4, teacher: 'Dr. Johnson' },
             { code: 'MA101', name: 'Mathematics I', credits: 3, teacher: 'Prof. Williams' },
-            { code: 'PH101', name: 'Physics I', credits: 3, teacher: 'Dr. Brown' }
-        );
-    }
-    
-    // Add sample students
-    if (students.length === 0) {
-        students.push(
-            { roll: 'CS001', name: 'John Doe', department: 'Computer Science', semester: 3, courses: ['CS101', 'CS201'], grades: [{courseCode: 'CS101', gradePoint: 3.7}, {courseCode: 'CS201', gradePoint: 3.3}], cgpa: 0, feePaid: true, fineAmount: 0 },
-            { roll: 'CS002', name: 'Jane Smith', department: 'Computer Science', semester: 5, courses: ['CS201', 'MA101'], grades: [{courseCode: 'CS201', gradePoint: 4.0}, {courseCode: 'MA101', gradePoint: 3.3}], cgpa: 0, feePaid: false, fineAmount: 500 },
-            { roll: 'EC001', name: 'Bob Wilson', department: 'Electronics', semester: 3, courses: ['PH101', 'MA101'], grades: [{courseCode: 'PH101', gradePoint: 3.0}, {courseCode: 'MA101', gradePoint: 2.7}], cgpa: 0, feePaid: true, fineAmount: 0 }
+            { code: 'PH101', name: 'Physics I', credits: 3, teacher: 'Dr. Brown' },
+            { code: 'ENG101', name: 'English Composition', credits: 2, teacher: 'Prof. Davis' }
         );
         
-        // Calculate CGPA for sample students
+        students.push(
+            { roll: 'CS001', name: 'John Doe', department: 'Computer Science', semester: 3, courses: ['CS101', 'CS201'], grades: [{courseCode: 'CS101', gradePoint: 3.7}, {courseCode: 'CS201', gradePoint: 3.3}], feePaid: true, fineAmount: 0 },
+            { roll: 'CS002', name: 'Jane Smith', department: 'Computer Science', semester: 5, courses: ['CS201', 'MA101'], grades: [{courseCode: 'CS201', gradePoint: 4.0}, {courseCode: 'MA101', gradePoint: 3.3}], feePaid: false, fineAmount: 500 },
+            { roll: 'EC001', name: 'Bob Wilson', department: 'Electronics', semester: 3, courses: ['PH101', 'MA101'], grades: [{courseCode: 'PH101', gradePoint: 3.0}, {courseCode: 'MA101', gradePoint: 2.7}], feePaid: true, fineAmount: 0 },
+            { roll: 'CS003', name: 'Alice Johnson', department: 'Computer Science', semester: 2, courses: ['CS101'], grades: [{courseCode: 'CS101', gradePoint: 3.0}], feePaid: false, fineAmount: 0 },
+            { roll: 'ME001', name: 'Charlie Brown', department: 'Mechanical', semester: 4, courses: ['MA101', 'PH101'], grades: [{courseCode: 'MA101', gradePoint: 2.7}, {courseCode: 'PH101', gradePoint: 2.3}], feePaid: true, fineAmount: 200 }
+        );
+        
         students.forEach(s => {
             s.cgpa = calculateCGPA(s);
         });
+        
+        saveData();
     }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadData();
+    addSampleData();
     
-    saveData();
     renderStudents();
     renderCourses();
     updateCourseStats();
     renderDefaulters();
     updateQuickAllocate();
-}
+    
+    // Mobile menu toggle
+    const menuToggle = document.getElementById('menuToggle');
+    if (menuToggle) {
+        menuToggle.addEventListener('click', () => {
+            document.getElementById('sidebar').classList.toggle('show');
+        });
+    }
+    
+    // Close sidebar when clicking outside on mobile
+    document.addEventListener('click', (e) => {
+        const sidebar = document.getElementById('sidebar');
+        const menuToggleBtn = document.getElementById('menuToggle');
+        if (window.innerWidth <= 768 && sidebar.classList.contains('show')) {
+            if (!sidebar.contains(e.target) && !menuToggleBtn.contains(e.target)) {
+                sidebar.classList.remove('show');
+            }
+        }
+    });
+});
