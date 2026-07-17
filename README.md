@@ -1,5 +1,4 @@
-# student-management-system-pro
-Complete Student Management System with Admin &amp; Student portals, CGPA, Fees &amp; Course
+
 # 🎓 Student Management System (Vanilla JS)
 
 A fully functional Student Management System built using:
