@@ -140,16 +140,8 @@ No backend required.
 
 ---
 
-# 📂 Project Structure
-
-student-management-system-js/
-│
-├── index.html
-└── README.md
-
----
-
-
+Live Demo:
+https://furqanstudentmanagementsystem.netlify.app/
 
 # 📈 Highlights
 
